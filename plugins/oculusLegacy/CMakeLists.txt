@@ -6,10 +6,7 @@
 #  See the accompanying file LICENSE or http:#www.apache.org/licenses/LICENSE-2.0.html
 #
 
-#  Windows doesn't need this, and building it currently make Linux unstable.
-#  if (NOT WIN32)
-if (APPLE)
-
+if (NOT WIN32)
     set(TARGET_NAME oculusLegacy)
     setup_hifi_plugin()
     link_hifi_libraries(shared gl gpu plugins ui ui-plugins display-plugins input-plugins)
@@ -19,10 +16,10 @@ if (APPLE)
     add_dependency_external_projects(LibOVR)
     find_package(LibOVR REQUIRED)
     target_include_directories(${TARGET_NAME} PRIVATE ${LIBOVR_INCLUDE_DIRS})
-    find_library(COCOA_LIBRARY Cocoa)
-    find_library(IOKIT_LIBRARY IOKit)
-    target_link_libraries(${TARGET_NAME} ${LIBOVR_LIBRARIES} ${COCOA_LIBRARY} ${IOKIT_LIBRARY})
-
-
-
+    if (APPLE)
+        find_library(COCOA_LIBRARY Cocoa)
+	find_library(IOKIT_LIBRARY IOKit)
+	target_link_libraries(${TARGET_NAME} ${COCOA_LIBRARY} ${IOKIT_LIBRARY})
+    endif()
+    target_link_libraries(${TARGET_NAME} ${LIBOVR_LIBRARIES})
 endif()
