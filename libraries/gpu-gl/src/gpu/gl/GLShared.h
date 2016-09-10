@@ -18,6 +18,12 @@ Q_DECLARE_LOGGING_CATEGORY(gpugllogging)
 
 namespace gpu { namespace gl { 
 
+// Create a fence and inject a GPU wait on the fence
+void serverWait();
+
+// Create a fence and synchronously wait on the fence
+void clientWait();
+
 gpu::Size getDedicatedMemory();
 ComparisonFunction comparisonFuncFromGL(GLenum func);
 State::StencilOp stencilOpFromGL(GLenum stencilOp);
@@ -121,15 +127,19 @@ static const GLenum ELEMENT_TYPE_TO_GL[gpu::NUM_TYPES] = {
 bool checkGLError(const char* name = nullptr);
 bool checkGLErrorDebug(const char* name = nullptr);
 
+class GLBackend;
+
 template <typename GPUType>
 struct GLObject : public GPUObject {
 public:
-    GLObject(const GPUType& gpuObject, GLuint id) : _gpuObject(gpuObject), _id(id) {}
+    GLObject(const std::weak_ptr<GLBackend>& backend, const GPUType& gpuObject, GLuint id) : _gpuObject(gpuObject), _id(id), _backend(backend) {}
 
     virtual ~GLObject() { }
 
     const GPUType& _gpuObject;
     const GLuint _id;
+protected:
+    const std::weak_ptr<GLBackend> _backend;
 };
 
 class GlBuffer;

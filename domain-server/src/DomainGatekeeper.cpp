@@ -182,7 +182,7 @@ NodePermissions DomainGatekeeper::setPermissionsForUser(bool isLocalUser, QStrin
 
                     GroupRank rank = _server->_settingsManager.getGroupRank(groupID, rankID);
 #ifdef WANT_DEBUG
-                    qDebug() << "|  user-permissions: user is in group:" << groupID << " rank:"
+                    qDebug() << "|  user-permissions: user " << verifiedUsername << "is in group:" << groupID << " rank:"
                              << rank.name << "so:" << userPerms;
 #endif
                 }
@@ -509,9 +509,7 @@ bool DomainGatekeeper::verifyUserSignature(const QString& username,
         }
     } else {
         if (!senderSockAddr.isNull()) {
-            qDebug() << "Insufficient data to decrypt username signature - denying connection.";
-            sendConnectionDeniedPacket("Insufficient data", senderSockAddr,
-                DomainHandler::ConnectionRefusedReason::LoginError);
+            qDebug() << "Insufficient data to decrypt username signature - delaying connection.";
         }
     }
 

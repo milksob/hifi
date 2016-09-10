@@ -16,11 +16,12 @@
 #include <NodeList.h>
 
 #include "InboundAudioStream.h"
+#include "AudioLogging.h"
 
 const int STARVE_HISTORY_CAPACITY = 50;
 
 InboundAudioStream::InboundAudioStream(int numFrameSamples, int numFramesCapacity, const Settings& settings) :
-    _ringBuffer(numFrameSamples, false, numFramesCapacity),
+    _ringBuffer(numFrameSamples, numFramesCapacity),
     _lastPopSucceeded(false),
     _lastPopOutput(),
     _dynamicJitterBuffers(settings._dynamicJitterBuffers),
@@ -147,7 +148,7 @@ int InboundAudioStream::parseData(ReceivedMessage& message) {
                     writeDroppableSilentSamples(networkSamples);
                     // inform others of the mismatch
                     auto sendingNode = DependencyManager::get<NodeList>()->nodeWithUUID(message.getSourceID());
-                    emit mismatchedAudioCodec(sendingNode, _selectedCodecName);
+                    emit mismatchedAudioCodec(sendingNode, _selectedCodecName, codecInPacket);
                 }
             }
             break;
@@ -174,6 +175,9 @@ int InboundAudioStream::parseData(ReceivedMessage& message) {
         _currentJitterBufferFrames = 0;
 
         _oldFramesDropped += framesToDrop;
+
+        qCDebug(audiostream, "Dropped %d frames", framesToDrop);
+        qCDebug(audiostream, "Resetted current jitter frames");
     }
 
     framesAvailableChanged();
@@ -227,6 +231,9 @@ int InboundAudioStream::writeDroppableSilentSamples(int silentSamples) {
         // without waiting for _framesAvailableStat to fill up to 10s of samples.
         _currentJitterBufferFrames -= numSilentFramesToDrop;
         _silentFramesDropped += numSilentFramesToDrop;
+
+        qCDebug(audiostream, "Dropped %d silent frames", numSilentFramesToDrop);
+        qCDebug(audiostream, "Set current jitter frames to %d", _currentJitterBufferFrames);
 
         _framesAvailableStat.reset();
     }
@@ -308,6 +315,8 @@ void InboundAudioStream::framesAvailableChanged() {
 
     if (_framesAvailableStat.getElapsedUsecs() >= FRAMES_AVAILABLE_STAT_WINDOW_USECS) {
         _currentJitterBufferFrames = (int)ceil(_framesAvailableStat.getAverage());
+        qCDebug(audiostream, "Set current jitter frames to %d", _currentJitterBufferFrames);
+
         _framesAvailableStat.reset();
     }
 }
@@ -355,6 +364,7 @@ void InboundAudioStream::setToStarved() {
             // make sure _desiredJitterBufferFrames does not become lower here
             if (calculatedJitterBufferFrames >= _desiredJitterBufferFrames) {
                 _desiredJitterBufferFrames = calculatedJitterBufferFrames;
+                qCDebug(audiostream, "Set desired jitter frames to %d", _desiredJitterBufferFrames);
             }
         }
     }
@@ -444,6 +454,7 @@ void InboundAudioStream::packetReceivedUpdateTimingStats() {
                                                          / (float)AudioConstants::NETWORK_FRAME_USECS);
                 if (calculatedJitterBufferFrames < _desiredJitterBufferFrames) {
                     _desiredJitterBufferFrames = calculatedJitterBufferFrames;
+                    qCDebug(audiostream, "Set desired jitter frames to %d", _desiredJitterBufferFrames);
                 }
                 _timeGapStatsForDesiredReduction.clearNewStatsAvailableFlag();
             }

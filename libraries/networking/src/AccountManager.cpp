@@ -56,7 +56,7 @@ JSONCallbackParameters::JSONCallbackParameters(QObject* jsonCallbackReceiver, co
     updateReciever(updateReceiver),
     updateSlot(updateSlot)
 {
-    
+
 }
 
 QJsonObject AccountManager::dataObjectFromResponse(QNetworkReply &requestReply) {
@@ -85,7 +85,7 @@ AccountManager::AccountManager(UserAgentGetter userAgentGetter) :
 
     qRegisterMetaType<QNetworkAccessManager::Operation>("QNetworkAccessManager::Operation");
     qRegisterMetaType<JSONCallbackParameters>("JSONCallbackParameters");
-    
+
     qRegisterMetaType<QHttpMultiPart*>("QHttpMultiPart*");
 
     qRegisterMetaType<AccountManagerAuth::Type>();
@@ -143,7 +143,7 @@ void AccountManager::setAuthURL(const QUrl& authURL) {
         _authURL = authURL;
 
         qCDebug(networking) << "AccountManager URL for authenticated requests has been changed to" << qPrintable(_authURL.toString());
-        
+
         // check if there are existing access tokens to load from settings
         QFile accountsFile { accountFilePath() };
         bool loadedMap = false;
@@ -218,7 +218,7 @@ void AccountManager::sendRequest(const QString& path,
     QNetworkAccessManager& networkAccessManager = NetworkAccessManager::getInstance();
 
     QNetworkRequest networkRequest;
-
+    networkRequest.setAttribute(QNetworkRequest::FollowRedirectsAttribute, true);
     networkRequest.setHeader(QNetworkRequest::UserAgentHeader, _userAgentGetter());
 
     networkRequest.setRawHeader(METAVERSE_SESSION_ID_HEADER,
@@ -434,9 +434,9 @@ void AccountManager::removeAccountFromFile() {
 }
 
 bool AccountManager::hasValidAccessToken() {
-    
+
     if (_accountInfo.getAccessToken().token.isEmpty() || _accountInfo.getAccessToken().isExpired()) {
-        
+
         if (VERBOSE_HTTP_REQUEST_DEBUGGING) {
             qCDebug(networking) << "An access token is required for requests to" << qPrintable(_authURL.toString());
         }
@@ -468,7 +468,7 @@ void AccountManager::setAccessTokenForCurrentAuthURL(const QString& accessToken)
     } else if (!_accountInfo.getAccessToken().token.isEmpty()) {
         qCDebug(networking) << "Clearing AccountManager OAuth token.";
     }
-    
+
     _accountInfo.setAccessToken(newOAuthToken);
 
     persistAccountToFile();
@@ -484,6 +484,7 @@ void AccountManager::requestAccessToken(const QString& login, const QString& pas
     QNetworkAccessManager& networkAccessManager = NetworkAccessManager::getInstance();
 
     QNetworkRequest request;
+    request.setAttribute(QNetworkRequest::FollowRedirectsAttribute, true);
     request.setHeader(QNetworkRequest::UserAgentHeader, _userAgentGetter());
 
     QUrl grantURL = _authURL;
@@ -505,6 +506,29 @@ void AccountManager::requestAccessToken(const QString& login, const QString& pas
     connect(requestReply, SIGNAL(error(QNetworkReply::NetworkError)), this, SLOT(requestAccessTokenError(QNetworkReply::NetworkError)));
 }
 
+void AccountManager::requestAccessTokenWithSteam(QByteArray authSessionTicket) {
+    QNetworkAccessManager& networkAccessManager = NetworkAccessManager::getInstance();
+
+    QNetworkRequest request;
+    request.setHeader(QNetworkRequest::UserAgentHeader, _userAgentGetter());
+
+    QUrl grantURL = _authURL;
+    grantURL.setPath("/oauth/token");
+
+    const QString ACCOUNT_MANAGER_REQUESTED_SCOPE = "owner";
+
+    QByteArray postData;
+    postData.append("grant_type=password&");
+    postData.append("steam_auth_ticket=" + QUrl::toPercentEncoding(authSessionTicket) + "&");
+    postData.append("scope=" + ACCOUNT_MANAGER_REQUESTED_SCOPE);
+
+    request.setUrl(grantURL);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/x-www-form-urlencoded");
+
+    QNetworkReply* requestReply = networkAccessManager.post(request, postData);
+    connect(requestReply, &QNetworkReply::finished, this, &AccountManager::requestAccessTokenFinished);
+    connect(requestReply, SIGNAL(error(QNetworkReply::NetworkError)), this, SLOT(requestAccessTokenError(QNetworkReply::NetworkError)));
+}
 
 void AccountManager::requestAccessTokenFinished() {
     QNetworkReply* requestReply = reinterpret_cast<QNetworkReply*>(sender());
@@ -530,7 +554,7 @@ void AccountManager::requestAccessTokenFinished() {
             _accountInfo.setAccessTokenFromJSON(rootObject);
 
             emit loginComplete(rootURL);
-            
+
             persistAccountToFile();
 
             requestProfile();
@@ -545,6 +569,7 @@ void AccountManager::requestAccessTokenFinished() {
 void AccountManager::requestAccessTokenError(QNetworkReply::NetworkError error) {
     // TODO: error handling
     qCDebug(networking) << "AccountManager requestError - " << error;
+    emit loginFailed();
 }
 
 void AccountManager::requestProfile() {
@@ -552,8 +577,9 @@ void AccountManager::requestProfile() {
 
     QUrl profileURL = _authURL;
     profileURL.setPath("/api/v1/user/profile");
-    
+
     QNetworkRequest profileRequest(profileURL);
+    profileRequest.setAttribute(QNetworkRequest::FollowRedirectsAttribute, true);
     profileRequest.setHeader(QNetworkRequest::UserAgentHeader, _userAgentGetter());
     profileRequest.setRawHeader(ACCESS_TOKEN_AUTHORIZATION_HEADER, _accountInfo.getAccessToken().authorizationHeaderValue());
 
@@ -578,7 +604,7 @@ void AccountManager::requestProfileFinished() {
 
         // store the whole profile into the local settings
         persistAccountToFile();
-        
+
     } else {
         // TODO: error handling
         qCDebug(networking) << "Error in response for profile";
@@ -634,14 +660,14 @@ void AccountManager::generateNewKeypair(bool isUserKeypair, const QUuid& domainI
         connect(generateThread, &QThread::finished, generateThread, &QThread::deleteLater);
 
         keypairGenerator->moveToThread(generateThread);
-        
+
         qCDebug(networking) << "Starting worker thread to generate 2048-bit RSA keypair.";
         generateThread->start();
     }
 }
 
 void AccountManager::processGeneratedKeypair() {
-    
+
     qCDebug(networking) << "Generated 2048-bit RSA keypair. Uploading public key now.";
 
     RSAKeypairGenerator* keypairGenerator = qobject_cast<RSAKeypairGenerator*>(sender());
@@ -692,7 +718,7 @@ void AccountManager::processGeneratedKeypair() {
 
         sendRequest(uploadPath, AccountManagerAuth::Optional, QNetworkAccessManager::PutOperation,
                     callbackParameters, QByteArray(), requestMultiPart);
-        
+
         keypairGenerator->deleteLater();
     } else {
         qCWarning(networking) << "Expected processGeneratedKeypair to be called by a live RSAKeypairGenerator"

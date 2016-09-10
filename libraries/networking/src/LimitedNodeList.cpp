@@ -18,6 +18,7 @@
 #include <QtCore/QDataStream>
 #include <QtCore/QDebug>
 #include <QtCore/QJsonDocument>
+#include <QtCore/QThread>
 #include <QtCore/QUrl>
 #include <QtNetwork/QHostInfo>
 
@@ -25,6 +26,7 @@
 
 #include <LogHandler.h>
 #include <NumericalConstants.h>
+#include <SettingHandle.h>
 #include <SharedUtil.h>
 #include <UUID.h>
 
@@ -34,12 +36,14 @@
 #include "NetworkLogging.h"
 #include "udt/Packet.h"
 
+static Setting::Handle<quint16> LIMITED_NODELIST_LOCAL_PORT("LimitedNodeList.LocalPort", 0);
+
 const std::set<NodeType_t> SOLO_NODE_TYPES = {
     NodeType::AvatarMixer,
     NodeType::AudioMixer
 };
 
-LimitedNodeList::LimitedNodeList(unsigned short socketListenPort, unsigned short dtlsListenPort) :
+LimitedNodeList::LimitedNodeList(int socketListenPort, int dtlsListenPort) :
     _sessionUUID(),
     _nodeHash(),
     _nodeMutex(QReadWriteLock::Recursive),
@@ -62,11 +66,11 @@ LimitedNodeList::LimitedNodeList(unsigned short socketListenPort, unsigned short
     }
 
     qRegisterMetaType<ConnectionStep>("ConnectionStep");
-
-    _nodeSocket.bind(QHostAddress::AnyIPv4, socketListenPort);
+    auto port = (socketListenPort != INVALID_PORT) ? socketListenPort : LIMITED_NODELIST_LOCAL_PORT.get();
+    _nodeSocket.bind(QHostAddress::AnyIPv4, port);
     qCDebug(networking) << "NodeList socket is listening on" << _nodeSocket.localPort();
 
-    if (dtlsListenPort > 0) {
+    if (dtlsListenPort != INVALID_PORT) {
         // only create the DTLS socket during constructor if a custom port is passed
         _dtlsSocket = new QUdpSocket(this);
 
@@ -157,6 +161,18 @@ void LimitedNodeList::setPermissions(const NodePermissions& newPermissions) {
     }
 }
 
+void LimitedNodeList::setSocketLocalPort(quint16 socketLocalPort) {
+    if (QThread::currentThread() != thread()) {
+        QMetaObject::invokeMethod(this, "setSocketLocalPort", Qt::QueuedConnection,
+                                  Q_ARG(quint16, socketLocalPort));
+        return;
+    }
+    if (_nodeSocket.localPort() != socketLocalPort) {
+        _nodeSocket.rebind(socketLocalPort);
+        LIMITED_NODELIST_LOCAL_PORT.set(socketLocalPort);
+    }
+}
+
 QUdpSocket& LimitedNodeList::getDTLSSocket() {
     if (!_dtlsSocket) {
         // DTLS socket getter called but no DTLS socket exists, create it now
@@ -175,7 +191,11 @@ QUdpSocket& LimitedNodeList::getDTLSSocket() {
 }
 
 bool LimitedNodeList::isPacketVerified(const udt::Packet& packet) {
-    return packetVersionMatch(packet) && packetSourceAndHashMatch(packet);
+    // We track bandwidth when doing packet verification to avoid needing to do a node lookup
+    // later when we already do it in packetSourceAndHashMatchAndTrackBandwidth. A node lookup
+    // incurs a lock, so it is ideal to avoid needing to do it 2+ times for each packet
+    // received.
+    return packetVersionMatch(packet) && packetSourceAndHashMatchAndTrackBandwidth(packet);
 }
 
 bool LimitedNodeList::packetVersionMatch(const udt::Packet& packet) {
@@ -224,11 +244,12 @@ bool LimitedNodeList::packetVersionMatch(const udt::Packet& packet) {
     }
 }
 
-bool LimitedNodeList::packetSourceAndHashMatch(const udt::Packet& packet) {
+bool LimitedNodeList::packetSourceAndHashMatchAndTrackBandwidth(const udt::Packet& packet) {
 
     PacketType headerType = NLPacket::typeInHeader(packet);
 
     if (NON_SOURCED_PACKETS.contains(headerType)) {
+        emit dataReceived(NodeType::Unassigned, packet.getPayloadSize());
         return true;
     } else {
         QUuid sourceID = NLPacket::sourceIDInHeader(packet);
@@ -259,6 +280,8 @@ bool LimitedNodeList::packetSourceAndHashMatch(const udt::Packet& packet) {
             // No matter if this packet is handled or not, we update the timestamp for the last time we heard
             // from this sending node
             matchingNode->setLastHeardMicrostamp(usecTimestampNow());
+
+            emit dataReceived(matchingNode->getType(), packet.getPayloadSize());
 
             return true;
 
@@ -598,6 +621,12 @@ SharedNodePointer LimitedNodeList::addOrUpdateNode(const QUuid& uuid, NodeType_t
                 disconnect(newNodePointer.data(), &NetworkPeer::socketActivated, this, 0);
             });
         }
+
+        // Signal when a socket changes, so we can start the hole punch over.
+        auto weakPtr = newNodePointer.toWeakRef(); // We don't want the lambda to hold a strong ref
+        connect(newNodePointer.data(), &NetworkPeer::socketUpdated, this, [=] {
+            emit nodeSocketUpdated(weakPtr);
+        });
 
         return newNodePointer;
     }

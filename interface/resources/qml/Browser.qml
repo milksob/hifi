@@ -1,6 +1,6 @@
 import QtQuick 2.5
 import QtQuick.Controls 1.2
-import QtWebEngine 1.1
+import QtWebEngine 1.2
 
 import "controls-uit"
 import "styles" as HifiStyles
@@ -218,16 +218,25 @@ ScrollingWindow {
             onIconChanged: {
                 console.log("New icon: " + icon)
             }
-            onNewViewRequested:{
+            onNewViewRequested: {
                 var component = Qt.createComponent("Browser.qml");
                 var newWindow = component.createObject(desktop);
                 request.openIn(newWindow.webView)
-            }      
-            //profile: desktop.browserProfile
+            }
+            onWindowCloseRequested: {
+                root.destroy();
+            }
+
+            Component.onCompleted: {
+                desktop.initWebviewProfileHandlers(webview.profile)
+            }
+
+            profile: desktop.browserProfile
         }
 
     } // item
-    
+
+
     Keys.onPressed: {
         switch(event.key) {
             case Qt.Key_L:

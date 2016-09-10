@@ -49,17 +49,17 @@ public:
 
     // removes an AudioHRTF object for a given stream
     void removeHRTFForStream(const QUuid& nodeID, const QUuid& streamID = QUuid());
-    
-    int parseData(ReceivedMessage& message);
+
+    int parseData(ReceivedMessage& message) override;
 
     void checkBuffersBeforeFrameSend();
 
     void removeDeadInjectedStreams();
 
     QJsonObject getAudioStreamStats();
-    
+
     void sendAudioStreamStatsPackets(const SharedNodePointer& destinationNode);
-    
+
     void incrementOutgoingMixedAudioSequenceNumber() { _outgoingMixedAudioSequenceNumber++; }
     quint16 getOutgoingSequenceNumber() const { return _outgoingMixedAudioSequenceNumber; }
 
@@ -84,6 +84,7 @@ signals:
     void injectorStreamFinished(const QUuid& streamIdentifier);
 
 public slots:
+    void handleMismatchAudioFormat(SharedNodePointer node, const QString& currentCodec, const QString& recievedCodec);
     void sendSelectAudioFormat(SharedNodePointer node, const QString& selectedCodecName);
 
 private:
